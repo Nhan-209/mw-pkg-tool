@@ -1,7 +1,7 @@
 use super::types::{PkgManifest, MANIFEST_FILENAME, PKG_HEADER_MAGIC_SIZE};
 use anyhow::{bail, Context, Result};
 use md5::{Digest, Md5};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -89,18 +89,30 @@ pub fn repack_pkg<P: AsRef<Path>, Q: AsRef<Path>>(
     let (v1, v2) = if let Some(ref m) = maybe_manifest {
         (m.v1, m.v2)
     } else {
-        (0, 0)
+        (139, 9)
     };
 
-    // 2. Discover all files
-    let mut manifest_map = HashMap::new();
+    // 2. Discover and order files to pack
+    let has_dotdot_prefix = if let Some(ref m) = maybe_manifest {
+        m.files.iter().any(|f| f.name.starts_with("../"))
+    } else {
+        true
+    };
+
+    let mut manifest_by_norm = HashMap::new();
+    let mut manifest_order = Vec::new();
+    let mut seen_norm_paths = HashSet::new();
+
     if let Some(ref m) = maybe_manifest {
         for f in &m.files {
-            manifest_map.insert(f.name.clone(), f.clone());
+            let norm = f.name.trim_start_matches("../").replace('\\', "/");
+            manifest_by_norm.insert(norm.clone(), f.clone());
+            manifest_order.push((f.name.clone(), norm));
         }
     }
 
-    let mut disk_files = Vec::new();
+    // Scan disk files
+    let mut disk_files_map = HashMap::new();
     for entry in WalkDir::new(input_dir).into_iter().filter_map(|e| e.ok()) {
         let path = entry.path();
         if path.is_file() {
@@ -109,41 +121,54 @@ pub fn repack_pkg<P: AsRef<Path>, Q: AsRef<Path>>(
                 continue;
             }
             let rel = path.strip_prefix(input_dir)?;
-            let rel_str = rel.to_string_lossy().replace('\\', "/");
-            disk_files.push((rel_str, path.to_path_buf()));
+            let rel_norm = rel.to_string_lossy().replace('\\', "/");
+            disk_files_map.insert(rel_norm, path.to_path_buf());
         }
     }
 
-    // Sort to keep consistent order if manifest wasn't preserving it
-    disk_files.sort_by(|a, b| a.0.cmp(&b.0));
-    println!("    - Found {} files to pack", disk_files.len());
+    // Order files: first manifest entries in their original sequence, then any newly added files
+    let mut files_to_pack = Vec::new();
 
-    let mut prepared_entries = Vec::with_capacity(disk_files.len());
+    for (archive_name, norm_rel) in manifest_order {
+        if let Some(disk_path) = disk_files_map.get(&norm_rel) {
+            let me = manifest_by_norm.get(&norm_rel).cloned();
+            files_to_pack.push((archive_name, disk_path.clone(), me));
+            seen_norm_paths.insert(norm_rel);
+        }
+    }
 
-    for (name, path) in disk_files {
+    let mut new_disk_files: Vec<_> = disk_files_map
+        .into_iter()
+        .filter(|(norm_rel, _)| !seen_norm_paths.contains(norm_rel))
+        .collect();
+    new_disk_files.sort_by(|a, b| a.0.cmp(&b.0));
+
+    for (norm_rel, disk_path) in new_disk_files {
+        let archive_name = if has_dotdot_prefix {
+            format!("../{}", norm_rel)
+        } else {
+            norm_rel.clone()
+        };
+        files_to_pack.push((archive_name, disk_path, None));
+    }
+
+    println!("    - Found {} files to pack", files_to_pack.len());
+
+    let mut prepared_entries = Vec::with_capacity(files_to_pack.len());
+
+    for (name, path, manifest_entry) in files_to_pack {
         let raw_data = fs::read(&path)
             .with_context(|| format!("Failed to read file {:?}", path))?;
-
-        let manifest_entry = manifest_map.get(&name);
 
         let flag = if options.no_compression {
             0
         } else if options.force_compression {
             1
-        } else if let Some(me) = manifest_entry {
+        } else if let Some(ref me) = manifest_entry {
             me.flag
         } else {
             1 // Default: LZ4 compress
         };
-
-        // Calculate MD5 of uncompressed data
-        let mut hasher = Md5::new();
-        hasher.update(&raw_data);
-        let hash_result = hasher.finalize();
-        let mut h1 = [0u8; 16];
-        h1.copy_from_slice(&hash_result);
-
-        let h2 = manifest_entry.and_then(|me| me.h2.as_ref().and_then(|s| hex_decode(s)));
 
         // Compress payload if flag & 1 != 0
         let payload = if (flag & 1) != 0 {
@@ -156,6 +181,15 @@ pub fn repack_pkg<P: AsRef<Path>, Q: AsRef<Path>>(
         } else {
             raw_data
         };
+
+        // MD5 hash of the payload written to PKG
+        let mut hasher = Md5::new();
+        hasher.update(&payload);
+        let hash_result = hasher.finalize();
+        let mut h1 = [0u8; 16];
+        h1.copy_from_slice(&hash_result);
+
+        let h2 = manifest_entry.as_ref().and_then(|me| me.h2.as_ref().and_then(|s| hex_decode(s)));
 
         prepared_entries.push(PreparedEntry {
             name,

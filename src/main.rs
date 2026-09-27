@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 #[derive(Parser)]
 #[command(name = "mw-pkg-tool")]
 #[command(author = "Nhan-209")]
-#[command(version = "0.2.0")]
+#[command(version = "0.2.1")]
 #[command(about = "Ultra-fast native tool to unpack, repack, and clean Mini World .PKG archives & Lua scripts", long_about = None)]
 struct Cli {
     #[command(subcommand)]
