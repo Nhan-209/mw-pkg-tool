@@ -1,0 +1,8 @@
+/target
+dist/
+**/*.rs.bk
+*.tmp
+*.pkg.tmp
+Cargo.lock
+.idea/
+.vscode/

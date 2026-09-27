@@ -1,0 +1,73 @@
+name: Rust CI & Release Build
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-release:
+    name: Build (${{ matrix.target }})
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      matrix:
+        target:
+          - x86_64-pc-windows-msvc
+          - i686-pc-windows-msvc
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      - name: Build Optimized Release Binary
+        run: cargo build --target ${{ matrix.target }} --release
+
+      - name: Rename Artifact for Distribution
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/mw-pkg-tool.exe dist/mw-pkg-tool-${{ matrix.target }}.exe
+          cp target/${{ matrix.target }}/release/mw-pkg-tool.exe dist/mw-pkg-tool.exe
+
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mw-pkg-tool-${{ matrix.target }}
+          path: |
+            dist/mw-pkg-tool-${{ matrix.target }}.exe
+            dist/mw-pkg-tool.exe
+
+      - name: Create Release and Upload Asset (Tag only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/mw-pkg-tool-${{ matrix.target }}.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
