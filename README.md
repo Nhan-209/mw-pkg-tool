@@ -53,7 +53,16 @@ mw-pkg-tool pack my_folder -o custom.pkg --force-compress
 mw-pkg-tool pack my_folder -o custom.pkg --no-compress
 ```
 
-### 3. Scan system for Mini World packages:
+### 3. Clean & decode Lua scripts:
+```bash
+# Clean all Lua scripts in folder (decode \ddd escapes to UTF-8 & remove decompiler junk)
+mw-pkg-tool clean extracted_script_res
+
+# Unpack and clean in one step:
+mw-pkg-tool unpack script_res.pkg --clean
+```
+
+### 4. Scan system for Mini World packages:
 ```bash
 mw-pkg-tool scan
 ```

@@ -2,7 +2,7 @@ mod pkg;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use pkg::{repack_pkg, unpack_pkg, PackOptions};
+use pkg::{clean_directory, repack_pkg, unpack_pkg, PackOptions};
 use std::env;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 #[derive(Parser)]
 #[command(name = "mw-pkg-tool")]
 #[command(author = "Nhan-209")]
-#[command(version = "0.1.0")]
-#[command(about = "Ultra-fast native tool to unpack and repack Mini World .PKG archives", long_about = None)]
+#[command(version = "0.2.0")]
+#[command(about = "Ultra-fast native tool to unpack, repack, and clean Mini World .PKG archives & Lua scripts", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -31,6 +31,10 @@ enum Commands {
         /// Custom output folder (defaults to <name>_extracted)
         #[arg(short, long)]
         output: Option<PathBuf>,
+
+        /// Automatically decode & clean decompiled Lua files after unpack
+        #[arg(long)]
+        clean: bool,
     },
 
     /// Repack a folder back into a .pkg archive
@@ -49,6 +53,16 @@ enum Commands {
         /// Disable compression on all files
         #[arg(long)]
         no_compress: bool,
+    },
+
+    /// Clean & decode Lua files (decodes \ddd escapes to UTF-8, strips decompiler junk)
+    Clean {
+        /// Path to folder containing Lua files
+        input: PathBuf,
+
+        /// Custom output folder (modifies in-place if omitted)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
 
     /// Automatically scan %APPDATA% for Mini World .pkg files
@@ -110,14 +124,15 @@ fn scan_miniworld_pkgs() -> Vec<PathBuf> {
 
 fn run_interactive_menu() -> Result<()> {
     println!("================================================================");
-    println!("      MINI WORLD .PKG ARCHIVE TOOL - RUST HIGH-PERFORMANCE");
+    println!("      MINI WORLD .PKG TOOL & CLEANER (RUST NATIVE)");
     println!("================================================================");
     println!("1. Unpack a .pkg file");
     println!("2. Repack a directory to .pkg");
-    println!("3. Auto-scan Mini World folders in %APPDATA%");
-    println!("4. Exit");
+    println!("3. Clean & decode Lua scripts (\\ddd -> UTF-8, remove decompiler junk)");
+    println!("4. Auto-scan Mini World folders in %APPDATA%");
+    println!("5. Exit");
     println!("================================================================");
-    print!("Choose an option [1-4]: ");
+    print!("Choose an option [1-5]: ");
     io::stdout().flush()?;
 
     let mut choice = String::new();
@@ -132,7 +147,14 @@ fn run_interactive_menu() -> Result<()> {
             io::stdin().read_line(&mut input)?;
             let trimmed = input.trim().trim_matches('"');
             if !trimmed.is_empty() {
-                unpack_pkg(trimmed, None::<PathBuf>)?;
+                print!("Automatically clean Lua scripts after unpacking? [y/N]: ");
+                io::stdout().flush()?;
+                let mut clean_yn = String::new();
+                io::stdin().read_line(&mut clean_yn)?;
+                let out_dir = unpack_pkg(trimmed, None::<PathBuf>)?;
+                if clean_yn.trim().eq_ignore_ascii_case("y") {
+                    let _ = clean_directory(&out_dir, None::<PathBuf>);
+                }
             }
         }
         "2" => {
@@ -146,6 +168,16 @@ fn run_interactive_menu() -> Result<()> {
             }
         }
         "3" => {
+            print!("\nEnter path to folder containing Lua files: ");
+            io::stdout().flush()?;
+            let mut input = String::new();
+            io::stdin().read_line(&mut input)?;
+            let trimmed = input.trim().trim_matches('"');
+            if !trimmed.is_empty() {
+                clean_directory(trimmed, None::<PathBuf>)?;
+            }
+        }
+        "4" => {
             println!("\n[*] Scanning for .pkg files in system...");
             let pkgs = scan_miniworld_pkgs();
             if pkgs.is_empty() {
@@ -221,8 +253,15 @@ fn main() -> Result<()> {
     // Case 3: Standard CLI parser
     let cli = Cli::parse();
     match cli.command {
-        Some(Commands::Unpack { input, output }) => {
-            unpack_pkg(input, output)?;
+        Some(Commands::Unpack {
+            input,
+            output,
+            clean,
+        }) => {
+            let out_dir = unpack_pkg(&input, output)?;
+            if clean {
+                clean_directory(&out_dir, None::<PathBuf>)?;
+            }
         }
         Some(Commands::Pack {
             input,
@@ -235,6 +274,9 @@ fn main() -> Result<()> {
                 no_compression: no_compress,
             };
             repack_pkg(input, output, options)?;
+        }
+        Some(Commands::Clean { input, output }) => {
+            clean_directory(input, output)?;
         }
         Some(Commands::Scan) => {
             let pkgs = scan_miniworld_pkgs();
