@@ -55,7 +55,10 @@ mw-pkg-tool pack my_folder -o custom.pkg --no-compress
 
 ### 3. Clean & decode Lua scripts:
 ```bash
-# Clean all Lua scripts in folder (decode \ddd escapes to UTF-8 & remove decompiler junk)
+# Clean Lua scripts and save to a separate output folder (recommended):
+mw-pkg-tool clean extracted_script_res -o cleaned_script_res
+
+# Clean all Lua scripts in-place (modifies files directly if -o is omitted):
 mw-pkg-tool clean extracted_script_res
 
 # Unpack and clean in one step:

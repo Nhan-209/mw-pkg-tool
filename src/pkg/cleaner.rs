@@ -108,11 +108,11 @@ pub fn clean_directory<P: AsRef<Path>, Q: AsRef<Path>>(
         if path.is_file() {
             let is_lua = path.extension().map(|ext| ext.eq_ignore_ascii_case("lua")).unwrap_or(false);
             if is_lua {
-                let mut content = String::new();
-                let mut f = File::open(path)?;
-                f.read_to_string(&mut content)?;
-
-                let cleaned = clean_lua_content(&content);
+                let raw_bytes = fs::read(path)?;
+                let cleaned_bytes = match std::str::from_utf8(&raw_bytes) {
+                    Ok(content) => clean_lua_content(content).into_bytes(),
+                    Err(_) => raw_bytes,
+                };
 
                 let target_path = if in_place {
                     path.to_path_buf()
@@ -126,7 +126,7 @@ pub fn clean_directory<P: AsRef<Path>, Q: AsRef<Path>>(
                 };
 
                 let mut out_f = File::create(&target_path)?;
-                out_f.write_all(cleaned.as_bytes())?;
+                out_f.write_all(&cleaned_bytes)?;
                 count += 1;
 
                 if count % 1000 == 0 {
