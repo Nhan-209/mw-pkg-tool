@@ -1,6 +1,7 @@
+use super::decompiler::decompile_lua_51;
 use anyhow::Result;
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use walkdir::WalkDir;
@@ -109,9 +110,16 @@ pub fn clean_directory<P: AsRef<Path>, Q: AsRef<Path>>(
             let is_lua = path.extension().map(|ext| ext.eq_ignore_ascii_case("lua")).unwrap_or(false);
             if is_lua {
                 let raw_bytes = fs::read(path)?;
-                let cleaned_bytes = match std::str::from_utf8(&raw_bytes) {
-                    Ok(content) => clean_lua_content(content).into_bytes(),
-                    Err(_) => raw_bytes,
+                let cleaned_bytes = if raw_bytes.starts_with(b"\x1bLua") {
+                    match decompile_lua_51(&raw_bytes) {
+                        Ok(decompiled) => clean_lua_content(&decompiled).into_bytes(),
+                        Err(_) => raw_bytes,
+                    }
+                } else {
+                    match std::str::from_utf8(&raw_bytes) {
+                        Ok(content) => clean_lua_content(content).into_bytes(),
+                        Err(_) => raw_bytes,
+                    }
                 };
 
                 let target_path = if in_place {

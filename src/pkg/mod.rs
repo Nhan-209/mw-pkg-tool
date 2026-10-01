@@ -1,4 +1,5 @@
 pub mod cleaner;
+pub mod decompiler;
 pub mod reader;
 pub mod types;
 pub mod writer;

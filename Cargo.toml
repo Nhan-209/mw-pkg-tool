@@ -1,6 +1,6 @@
 [package]
 name = "mw-pkg-tool"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 authors = ["Nhan-209"]
 description = "Ultra-fast standalone Mini World .PKG archive unpacker and repacker"
